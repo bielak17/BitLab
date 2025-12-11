@@ -80,6 +80,31 @@ int main()
             return 1;
         }
         std::cout << "Handshake complete\n";
+
+            // 1. Peer maintenance: PING
+        send_ping(sock);
+
+        // Receive PONG? (For testing, we just send, receiving logic handles responses)
+        recv_with_timeout(sock, buffer, sizeof(buffer), "wait for pong");
+
+        // 2. Peer maintenance: ALERT
+        // Sending a fake network alert
+        send_alert(sock, "Warning: This is a BitLab test alert.");
+
+        // 3. Management: REJECT
+        // Simulating a rejection of a "tx" message because it was invalid (0x10)
+        send_reject(sock, "tx", 0x10, "Transaction invalid format");
+
+        // 4. Management: MESSAGE (Diagnostics)
+        // Sending diagnostic info via "message" command
+        send_diagnostic_message(sock, "Diagnostics: CPU Load 10%, Mem 20%");
+
+        // 5. Block Inventory: GETHEADERS
+        send_getheaders(sock);
+
+        // Wait for HEADERS response
+        recv_with_timeout(sock, buffer, sizeof(buffer), "headers");
+
         // Close connection and cleanup
         closesocket(sock);
         std::cout << "Connection closed\n";

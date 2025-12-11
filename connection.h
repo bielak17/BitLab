@@ -25,3 +25,30 @@ bool send_message(SOCKET sock, const std::string &command, uint8_t* payload, uin
 int build_version_payload(uint8_t* buf, const std::string &peer_ip);
 // receive data from socket with timeout and error handling. Returns number of bytes received, or -1 on error/timeout
 std::string recv_with_timeout(SOCKET sock, uint8_t* buffer, int buffer_size, const char* message_name);
+
+// --- ADDED FOR ASSIGNMENT ---
+
+// Helper for converting hex strings (like block hashes) to byte arrays
+void hex_string_to_bytes(const std::string& hex, uint8_t* out);
+
+// --- Peer Maintenance ---
+
+// Sends a 'ping' message with a random nonce to keep the connection alive.
+bool send_ping(SOCKET sock);
+
+// Sends an 'alert' message. 
+bool send_alert(SOCKET sock, const std::string& alert_message);
+
+// --- Additional/Management Features ---
+
+// Sends a 'reject' message to report a protocol error (CCode) to the peer.
+// ccode: 0x01=Malformed, 0x10=Invalid, 0x40=Obsolete, etc.
+bool send_reject(SOCKET sock, const std::string& rejected_command, uint8_t ccode, const std::string& reason);
+
+// Sends a custom 'message' message for diagnostics.
+bool send_diagnostic_message(SOCKET sock, const std::string& diagnostic_info);
+
+// --- Block Inventory & Exchange ---
+
+// Sends a 'getheaders' message to request block headers from the peer.
+bool send_getheaders(SOCKET sock);
