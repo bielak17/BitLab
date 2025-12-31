@@ -8,14 +8,12 @@ std::vector<std::string> lookup_dns_seed(const char *seed)
     memset(&hints, 0, sizeof(hints));
     hints.ai_family = AF_INET;
     hints.ai_socktype = SOCK_STREAM;
-
     std::cout << "Querying DNS seed: " << seed << '\n';
     int res = getaddrinfo(seed, std::to_string(BITCOIN_PORT).c_str(), &hints, &result);
     if (res != 0) {
         std::cout << "DNS lookup failed: " << res << '\n';
         return {};
     }
-
     std::vector<std::string> peers;
     for (ptr = result; ptr != NULL; ptr = ptr->ai_next) {
         struct sockaddr_in *sockaddr_ipv4 = (struct sockaddr_in *)ptr->ai_addr;
@@ -23,38 +21,112 @@ std::vector<std::string> lookup_dns_seed(const char *seed)
         std::cout << "Found peer: " << current_ip << ":" << BITCOIN_PORT << '\n';
         peers.emplace_back(current_ip);
     }
-
     freeaddrinfo(result);
     return peers;
 }
 
 // Connect to a peer; returns SOCKET or INVALID_SOCKET on failure
 SOCKET connect_to_peer(const std::string &ip, int port) {
-    SOCKET sock = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+    // Detect if IPv6 by checking for colons in the address
+    bool is_ipv6 = (ip.find(':') != std::string::npos);
+    // Create socket with appropriate family
+    SOCKET sock = socket(is_ipv6 ? AF_INET6 : AF_INET, SOCK_STREAM, IPPROTO_TCP);
     if (sock == INVALID_SOCKET) {
         std::cout << "Socket creation failed: " << WSAGetLastError() << '\n';
         return INVALID_SOCKET;
     }
-
-    struct sockaddr_in peer_addr = {0};
-    peer_addr.sin_family = AF_INET;
-    peer_addr.sin_port = htons(port);
-    if (inet_pton(AF_INET, ip.c_str(), &peer_addr.sin_addr) != 1) {
-        std::cout << "Invalid IP address: " << ip << '\n';
-        closesocket(sock);
-        return INVALID_SOCKET;
-    }
-
     std::cout << "Connecting to " << ip << ':' << port << " ..." << '\n';
-    if (connect(sock, (struct sockaddr*)&peer_addr, sizeof(peer_addr)) == SOCKET_ERROR) {
-        std::cout << "Connect failed: " << WSAGetLastError() << '\n';
-        closesocket(sock);
-        return INVALID_SOCKET;
-    }
+    if (is_ipv6) {
+        // IPv6
+        struct sockaddr_in6 peer_addr = {0};
+        peer_addr.sin6_family = AF_INET6;
+        peer_addr.sin6_port = htons(port);
+        if (inet_pton(AF_INET6, ip.c_str(), &peer_addr.sin6_addr) != 1) {
+            std::cout << "Invalid IPv6 address: " << ip << '\n';
+            closesocket(sock);
+            return INVALID_SOCKET;
+        }
 
+        if (connect(sock, (struct sockaddr*)&peer_addr, sizeof(peer_addr)) == SOCKET_ERROR) {
+            std::cout << "Connect failed: " << WSAGetLastError() << '\n';
+            closesocket(sock);
+            return INVALID_SOCKET;
+        }
+    } else {
+        // IPv4
+        struct sockaddr_in peer_addr = {0};
+        peer_addr.sin_family = AF_INET;
+        peer_addr.sin_port = htons(port);
+        if (inet_pton(AF_INET, ip.c_str(), &peer_addr.sin_addr) != 1) {
+            std::cout << "Invalid IPv4 address: " << ip << '\n';
+            closesocket(sock);
+            return INVALID_SOCKET;
+        }
+
+        if (connect(sock, (struct sockaddr*)&peer_addr, sizeof(peer_addr)) == SOCKET_ERROR) {
+            std::cout << "Connect failed: " << WSAGetLastError() << '\n';
+            closesocket(sock);
+            return INVALID_SOCKET;
+        }
+    }
     std::cout << "Connected to " << ip << ':' << port << '\n';
     return sock;
 }
+
+// Send getaddr (no payload) to request peer address list
+bool send_getaddr(SOCKET sock) {
+    std::cout << "Sending GETADDR..." << std::endl;
+    return send_message(sock, "getaddr", nullptr, 0);
+}
+
+// Parse addr payload (Bitcoin P2P addr message) and print (IP:port list) for first 10 peers found - returns vector of (IP, port) pairs
+std::vector<std::pair<std::string, int>> print_addr_list(const std::string& payload) {
+    std::vector<std::pair<std::string, int>> peers;
+    const uint8_t* data = (const uint8_t*)payload.data();
+    size_t len = payload.size();
+    size_t offset = 0;
+    int64_t count = read_varint(data, len, offset);
+    if (count < 0) {
+        std::cerr << "addr parse error: bad varint" << '\n';
+        return peers;
+    }
+    std::cout << "Peers addr entries (" << count << ", showing first 10):" << '\n';
+    int64_t display_limit = (count > 10) ? 10 : count;
+    for (int64_t i = 0; i < count; i++) {
+        if (offset + 30 > len) { break; }
+        // skip timestamp (4) and services (8)
+        offset += 4 + 8;
+        const uint8_t* ip = data + offset; // 16 bytes
+        offset += 16;
+        uint16_t port = (data[offset] << 8) | data[offset+1];
+        offset += 2;
+        std::string ipstr;
+        // handle IPv4-mapped IPv6: 10 zero bytes, 0xFF 0xFF, then 4 bytes IPv4
+        bool is_v4_mapped = true;
+        for (int j=0;j<10;j++) if (ip[j] != 0x00) { is_v4_mapped = false; break; }
+        if (!(ip[10]==0xFF && ip[11]==0xFF)) is_v4_mapped = false;
+        if (is_v4_mapped) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%u.%u.%u.%u", ip[12], ip[13], ip[14], ip[15]);
+            ipstr = buf;
+        } else {
+            // basic IPv6 print
+            char buf[64];
+            snprintf(buf, sizeof(buf), "%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x:%02x%02x",
+                ip[0],ip[1],ip[2],ip[3],ip[4],ip[5],ip[6],ip[7],ip[8],ip[9],ip[10],ip[11],ip[12],ip[13],ip[14],ip[15]);
+            ipstr = buf;
+        }
+        peers.push_back({ipstr, port});
+        if (i < display_limit) {
+            std::cout << (i+1) << ") " << ipstr << ":" << port << '\n';
+        }
+    }
+    if (count > 10) {
+        std::cout << "... and " << (count - 10) << " more peers\n";
+    }
+    return peers;
+}
+
 
 // Helpers for little-endian encoding
 void write_uint32_le(uint8_t* buf, uint32_t val) {
@@ -254,6 +326,32 @@ void write_varint(std::vector<uint8_t>& buf, uint64_t val) {
 void write_varstr(std::vector<uint8_t>& buf, const std::string& s) {
     write_varint(buf, s.size());
     buf.insert(buf.end(), s.begin(), s.end());
+}
+
+// Helper: read VarInt from buffer at offset; returns value and advances offset; -1 on error
+int64_t read_varint(const uint8_t* data, size_t len, size_t& offset) {
+    if (offset >= len) return -1;
+    uint8_t prefix = data[offset++];
+    if (prefix < 0xfd) return prefix;
+    if (prefix == 0xfd) {
+        if (offset + 2 > len) return -1;
+        uint16_t v = data[offset] | (data[offset+1] << 8);
+        offset += 2;
+        return v;
+    }
+    if (prefix == 0xfe) {
+        if (offset + 4 > len) return -1;
+        uint32_t v = 0;
+        for (int i=0;i<4;i++) v |= (uint32_t)data[offset+i] << (8*i);
+        offset += 4;
+        return v;
+    }
+    // 0xff
+    if (offset + 8 > len) return -1;
+    uint64_t v = 0;
+    for (int i=0;i<8;i++) v |= (uint64_t)data[offset+i] << (8*i);
+    offset += 8;
+    return (int64_t)v;
 }
 
 // Helper: Convert hex string to byte array (reversing for little-endian if needed for hashes)

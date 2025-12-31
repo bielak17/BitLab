@@ -19,8 +19,14 @@ SOCKET connect_to_peer(const std::string &ip, int port);
 // Helpers for little-endian encoding
 void write_uint32_le(uint8_t* buf, uint32_t val);
 void write_uint64_le(uint8_t* buf, uint64_t val);
+int64_t read_varint(const uint8_t* data, size_t len, size_t& offset);
 // Send Bitcoin message with header
 bool send_message(SOCKET sock, const std::string &command, uint8_t* payload, uint32_t len);
+// Request peer address list (getaddr)
+bool send_getaddr(SOCKET sock);
+// Parse addr payload (Bitcoin P2P addr message) and print (IP:port list) for first 10 peers found
+// Returns vector of (IP, port) pairs
+std::vector<std::pair<std::string, int>> print_addr_list(const std::string& payload);
 // Build minimal version payload
 int build_version_payload(uint8_t* buf, const std::string &peer_ip);
 // receive data from socket with timeout and error handling. Returns number of bytes received, or -1 on error/timeout
