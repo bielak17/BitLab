@@ -1,4 +1,4 @@
-//to compile (MinGW/g++): g++ connection.cpp main.cpp -o BitLab.exe -lws2_32
+//to compile (MinGW/g++): g++ connection.cpp main.cpp -o BitLab.exe -lws2_32 -lcrypt32
 //to run: ./BitLab.exe
 
 // own code
@@ -26,7 +26,9 @@ int main()
         return 0;
     }
 
+    // Connect to the last peer found (as in original code)
     SOCKET sock = connect_to_peer(peers.back(), BITCOIN_PORT);
+    
     if (sock != INVALID_SOCKET)
     {
         int timeout_ms = TIMEOUT_SECONDS * 1000;
@@ -44,8 +46,9 @@ int main()
             WSACleanup();
             return 1;
         }
+
         // build and send version message
-        uint8_t payload[100] = {0};
+        uint8_t payload[1000] = {0}; // slightly safer buffer size
         int payload_len = build_version_payload(payload, peers.back());
         if (!send_message(sock, "version", payload, payload_len))
         {
@@ -54,6 +57,7 @@ int main()
             WSACleanup();
             return 1;
         }
+
         // wait for version response
         uint8_t buffer[1024];
         if (recv_with_timeout(sock, buffer, sizeof(buffer), "version") == "-1")
@@ -63,6 +67,7 @@ int main()
             WSACleanup();
             return 1;
         }
+
         // send verack
         if (!send_message(sock, "verack", nullptr, 0))
         {
@@ -71,6 +76,7 @@ int main()
             WSACleanup();
             return 1;
         }
+
         // wait for verack response
         if (recv_with_timeout(sock, buffer, sizeof(buffer), "verack") == "-1")
         {
@@ -79,7 +85,11 @@ int main()
             WSACleanup();
             return 1;
         }
+
         std::cout << "Handshake complete\n";
+        
+        
+
         // Close connection and cleanup
         closesocket(sock);
         std::cout << "Connection closed\n";
