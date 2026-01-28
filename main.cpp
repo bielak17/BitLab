@@ -22,6 +22,10 @@ void print_menu()
     std::cout << "5. Send REJECT (tx)\n";
     std::cout << "6. Send DIAGNOSTIC MESSAGE\n";
     std::cout << "7. Wait for incoming message\n";
+    std::cout << "8. Send INV (TX)\n";
+    std::cout << "9. Send GETDATA (TX)\n";
+    std::cout << "10. Send TX (raw test tx)\n";
+    std::cout << "11. Send BLOCK (raw test block)\n";
     std::cout << "0. Exit\n";
     std::cout << "================================\n";
     std::cout << "Select option: ";
@@ -123,6 +127,53 @@ int main()
             case 7:
                 recv_with_timeout(sock, buffer, sizeof(buffer), "any");
                 break;
+
+                case 8:
+            {
+                std::string tx_hash;
+                std::cout << "Enter TX hash (hex): ";
+                std::cin >> tx_hash;
+
+                send_inv(sock, InventoryType::MSG_TX, tx_hash);
+                std::cout << "INV sent\n";
+                break;
+            }
+
+            case 9:
+            {
+                std::string tx_hash;
+                std::cout << "Enter TX hash (hex): ";
+                std::cin >> tx_hash;
+
+                send_getdata(sock, InventoryType::MSG_TX, tx_hash);
+                std::cout << "GETDATA sent\n";
+                break;
+            }
+
+            case 10:
+            {
+                // Minimal dummy transaction (not valid, but structurally OK)
+                std::vector<uint8_t> raw_tx = {
+                    0x01, 0x00, 0x00, 0x00, // version
+                    0x00,                 // input count
+                    0x00,                 // output count
+                    0x00, 0x00, 0x00, 0x00 // locktime
+                };
+
+                send_tx(sock, raw_tx);
+                std::cout << "TX sent\n";
+                break;
+            }
+
+            case 11:
+            {
+                // Minimal dummy block payload (header only)
+                std::vector<uint8_t> raw_block(80, 0x00);
+
+                send_block(sock, raw_block);
+                std::cout << "BLOCK sent\n";
+                break;
+            }
 
             case 0:
                 running = false;
