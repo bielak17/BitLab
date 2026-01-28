@@ -1,5 +1,7 @@
 #include "connection.h"
 
+
+
 // Resolve a DNS seed and return all found IPv4 peers as strings
 std::vector<std::string> lookup_dns_seed(const char *seed)
 {
@@ -306,10 +308,7 @@ std::string recv_with_timeout(SOCKET sock, uint8_t* buffer, int buffer_size, con
     return std::string((char*)buffer, len);
 }
 
-// --- ADDED IMPLEMENTATIONS ---
 
-// Helper: Append a Variable Length Integer (VarInt) to the buffer
-// Bitcoin protocol uses VarInt to save space for integer values.
 void write_varint(std::vector<uint8_t>& buf, uint64_t val) {
     if (val < 0xfd) {
         buf.push_back((uint8_t)val);
@@ -382,30 +381,18 @@ bool send_ping(SOCKET sock) {
 }
 
 // 2. ALERT MESSAGE
-// Note: This constructs a simplified payload. A real alert requires a signature 
-// from a specific key that is no longer in use, but the structure is valid.
 bool send_alert(SOCKET sock, const std::string& alert_message) {
     std::vector<uint8_t> payload;
-
-    // The alert payload is actually a serialized data structure + signature.
-    // For this assignment, we construct a dummy serialized alert content.
     std::vector<uint8_t> alert_content;
 
     // Version (int32)
     uint8_t tmp4[4];
     write_uint32_le(tmp4, 1); alert_content.insert(alert_content.end(), tmp4, tmp4 + 4);
-    // Relay Until (int64) - timestamp
     uint8_t tmp8[8];
     write_uint64_le(tmp8, (uint64_t)time(nullptr) + 3600); alert_content.insert(alert_content.end(), tmp8, tmp8 + 8);
-    // Expiration (int64)
     write_uint64_le(tmp8, (uint64_t)time(nullptr) + 7200); alert_content.insert(alert_content.end(), tmp8, tmp8 + 8);
-    // ID (int32)
     write_uint32_le(tmp4, 1001); alert_content.insert(alert_content.end(), tmp4, tmp4 + 4);
-    // Cancel (int32)
     write_uint32_le(tmp4, 0); alert_content.insert(alert_content.end(), tmp4, tmp4 + 4);
-    // SetCancel (set<int32>) - 0 items? No, SetCancel is internal. Let's assume empty set:
-    // Actually, constructing the full variable payload is complex. 
-    // We will simulate the variable parts:
     write_varint(alert_content, 0); // 0 cancellations
     write_uint32_le(tmp4, 0); alert_content.insert(alert_content.end(), tmp4, tmp4 + 4); // MinVer
     write_uint32_le(tmp4, PROTOCOL_VERSION); alert_content.insert(alert_content.end(), tmp4, tmp4 + 4); // MaxVer
@@ -414,10 +401,8 @@ bool send_alert(SOCKET sock, const std::string& alert_message) {
     write_varstr(alert_content, alert_message); // Comment
     write_varstr(alert_content, "BitLab Alert"); // StatusBar
     write_varstr(alert_content, ""); // Reserved
-
-    // Now pack the final payload: [VarStr Alert] [VarStr Signature]
     write_varstr(payload, std::string(alert_content.begin(), alert_content.end()));
-    write_varstr(payload, ""); // Empty signature (invalid, but correct structure)
+    write_varstr(payload, ""); 
 
     std::cout << "Sending ALERT: " << alert_message << "\n";
     return send_message(sock, "alert", payload.data(), payload.size());
@@ -426,19 +411,9 @@ bool send_alert(SOCKET sock, const std::string& alert_message) {
 // 3. REJECT MESSAGE
 bool send_reject(SOCKET sock, const std::string& rejected_command, uint8_t ccode, const std::string& reason) {
     std::vector<uint8_t> payload;
-
-    // 1. message (VarStr): type of message rejected
     write_varstr(payload, rejected_command);
-
-    // 2. ccode (1 byte): code relating to rejected message
-    // 0x01: MALFORMED, 0x10: INVALID, 0x11: OBSOLETE, 0x12: DUPLICATE, 0x40: NONSTANDARD
     payload.push_back(ccode);
-
-    // 3. reason (VarStr): text version of reason for rejection
     write_varstr(payload, reason);
-
-    // 4. data (optional): ignored here for simplicity
-
     std::cout << "Sending REJECT for command '" << rejected_command << "' (code " << (int)ccode << ")\n";
     return send_message(sock, "reject", payload.data(), payload.size());
 }
